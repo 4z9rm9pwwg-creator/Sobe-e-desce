@@ -83,6 +83,15 @@ h1,h2,h3{font-family:'Fraunces',Georgia,serif;font-weight:900;margin:0;letter-sp
 .toggle[aria-pressed="true"]{background:var(--red);border-color:var(--red);color:#000}
 .toggle.zero[aria-pressed="true"]{background:var(--gold);border-color:var(--gold);color:#000}
 .toggle:disabled{opacity:.4;cursor:default}
+.toggle.locked{opacity:.5;border-style:dashed}
+.toggle.shake{animation:shk .28s}
+@keyframes shk{0%,100%{transform:none}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+.toast{position:fixed;left:12px;right:12px;bottom:calc(76px + env(safe-area-inset-bottom));z-index:60;
+  max-width:536px;margin:0 auto;background:var(--red);color:#000;border-radius:4px;
+  font-family:'Inter Tight',sans-serif;font-size:13.5px;font-weight:600;line-height:1.35;
+  padding:11px 13px;box-shadow:0 8px 24px rgba(0,0,0,.55);
+  opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .18s,transform .18s}
+.toast.on{opacity:1;transform:none}
 .mnum{width:64px;flex:none;text-align:center;font-family:'Fraunces',serif;font-weight:900;font-size:23px;
   padding:8px 4px;border:1px solid var(--line);background:var(--raise);border-radius:4px;color:var(--ink)}
 .mnum.x2{border-color:var(--gold)}
@@ -260,6 +269,8 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:24px 0}
   </div>
 </section>
 
+<div class="toast" id="toast" role="alert" aria-live="assertive"></div>
+
 <!-- ============ REGRAS ============ -->
 <section id="rules" class="hide">
   <div class="masthead">
@@ -274,6 +285,7 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:24px 0}
 (function(){
 'use strict';
 const KEY='sobedesce:jogo';
+const CKEY='sobedesce:config';
 const $=s=>document.querySelector(s);
 const el=(t,c,x)=>{const n=document.createElement(t);if(c)n.className=c;if(x!=null)n.textContent=x;return n};
 
@@ -281,14 +293,26 @@ const SUITS=[
   {k:'copas',sym:'♥',nm:'Copas',red:true},
   {k:'ouros',sym:'♦',nm:'Ouros',red:true},
   {k:'paus',sym:'♣',nm:'Paus',red:false},
-  {k:'espadas',sym:'♠',nm:'Espadas',red:false},
-  {k:'nt',sym:'—',nm:'Sem trunfo',red:false}
+  {k:'espadas',sym:'♠',nm:'Espadas',red:false}
 ];
-const suitOf=k=>SUITS.find(s=>s.k===k)||SUITS[4];
+const suitOf=k=>SUITS.find(s=>s.k===k)||{k:k||'',sym:'—',nm:'—',red:false};
 
 let cfg={players:['Ana','Bruno','Carla','Diogo'],start:25,mustBelow:5,endRule:'atmost',
   max:10,allowOut:true,hearts:true,clubs:true,doubleNeg:true,zeroPen:5};
 let G=null;
+function saveCfg(){try{localStorage.setItem(CKEY,JSON.stringify(cfg))}catch(e){}}
+function loadCfg(){try{const v=localStorage.getItem(CKEY);if(v)Object.assign(cfg,JSON.parse(v))}catch(e){}}
+function fillSetup(){
+  $('#startPts').value=cfg.start;
+  $('#mustBelow').value=cfg.mustBelow;
+  $('#zeroPen').value=cfg.zeroPen;
+  $('#allowOut').checked=cfg.allowOut;
+  $('#rHearts').checked=cfg.hearts;
+  $('#rClubs').checked=cfg.clubs;
+  $('#rNeg').checked=cfg.doubleNeg;
+  $('#wrapNeg').classList.toggle('hide',!cfg.clubs);
+  [...$('#endChips').children].forEach(c=>c.setAttribute('aria-pressed',String(c.dataset.end===cfg.endRule)));
+}
 
 /* Guarda o jogo. Dentro do Claude existe window.storage; num site normal
    ou no telemóvel usa-se o localStorage do próprio browser. */
@@ -370,6 +394,19 @@ function mustPlay(p){
   return false;
 }
 const nActive=()=>G.out.filter(o=>!o).length;
+function forcedWhy(p){
+  const nome=G.players[p];
+  if(!G.allowOut)return 'Nesta partida ninguém pode ficar de fora.';
+  if(satOutLast(p))return nome+' passou a ronda anterior. Não se pode passar duas seguidas.';
+  if(totals()[p]<G.mustBelow)return nome+' tem menos de '+G.mustBelow+' pontos. Abaixo de '+G.mustBelow+' vai-se sempre a jogo.';
+  if(G.hearts&&G.suit==='copas')return 'Trunfo de copas: vão todos a jogo.';
+  return 'Este jogador tem de ir a esta ronda.';
+}
+let toastT=null;
+function toast(msg){
+  const t=$('#toast');t.textContent=msg;t.classList.add('on');
+  clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),4000);
+}
 
 /* ================= CONFIGURAÇÃO ================= */
 function drawNames(){
@@ -396,27 +433,31 @@ function fillMax(){
   sel.value=cfg.max;
 }
 function setupTally(){
-  const ok=cfg.players.length>=2&&cfg.players.every(p=>p.trim());
+  const nomes=cfg.players.length>=2&&cfg.players.every(p=>p.trim());
+  const pontos=cfg.start>=1;
+  const ok=nomes&&pontos;
   $('#setupTally').innerHTML=ok
     ? cfg.players.length+' jogadores · de <b>'+cfg.start+'</b> a <b>0</b>'
-    : 'Faltam nomes';
+    : (!nomes?'Faltam nomes':'Os pontos iniciais têm de ser pelo menos 1');
   $('#setupTally').classList.toggle('warn',!ok);
   $('#btnStart').disabled=!ok;
+  saveCfg();
 }
 $('#addPlayer').onclick=()=>{if(cfg.players.length<8){cfg.players.push('');drawNames();setupTally()}};
-$('#startPts').oninput=e=>{cfg.start=+e.target.value||25;setupTally()};
-$('#mustBelow').oninput=e=>{cfg.mustBelow=+e.target.value||0};
-$('#zeroPen').oninput=e=>{cfg.zeroPen=Math.abs(+e.target.value)||0};
-$('#maxc').onchange=e=>cfg.max=+e.target.value;
+$('#startPts').oninput=e=>{cfg.start=Math.abs(+e.target.value)||0;setupTally()};
+$('#mustBelow').oninput=e=>{cfg.mustBelow=Math.abs(+e.target.value)||0;saveCfg()};
+$('#zeroPen').oninput=e=>{cfg.zeroPen=Math.abs(+e.target.value)||0;saveCfg()};
+$('#maxc').onchange=e=>{cfg.max=+e.target.value;saveCfg()};
 $('#endChips').onclick=e=>{
   const b=e.target.closest('.chip');if(!b)return;
   cfg.endRule=b.dataset.end;
   [...$('#endChips').children].forEach(c=>c.setAttribute('aria-pressed',String(c.dataset.end===cfg.endRule)));
+  saveCfg();
 };
-$('#allowOut').onchange=e=>cfg.allowOut=e.target.checked;
-$('#rHearts').onchange=e=>cfg.hearts=e.target.checked;
-$('#rClubs').onchange=e=>{cfg.clubs=e.target.checked;$('#wrapNeg').classList.toggle('hide',!cfg.clubs)};
-$('#rNeg').onchange=e=>cfg.doubleNeg=e.target.checked;
+$('#allowOut').onchange=e=>{cfg.allowOut=e.target.checked;saveCfg()};
+$('#rHearts').onchange=e=>{cfg.hearts=e.target.checked;saveCfg()};
+$('#rClubs').onchange=e=>{cfg.clubs=e.target.checked;$('#wrapNeg').classList.toggle('hide',!cfg.clubs);saveCfg()};
+$('#rNeg').onchange=e=>{cfg.doubleNeg=e.target.checked;saveCfg()};
 
 $('#btnStart').onclick=()=>{
   G={players:cfg.players.map(p=>p.trim()),start:cfg.start,mustBelow:cfg.mustBelow,endRule:cfg.endRule,
@@ -456,7 +497,7 @@ function drawSuits(){
   bn.classList.toggle('hot',msgs.length>0);
   bn.textContent=msgs.length?msgs.join(' ')
     :!G.suit?'Escolhe o naipe da carta virada.'
-    :G.suit==='nt'?'Sem trunfo.':'Sem regra especial neste naipe.';
+    :'Sem regra especial neste naipe.';
 }
 function drawRound(){
   const c=cardsAt(G.i),n=G.players.length,dealer=G.i%n,T=totals();
@@ -477,10 +518,17 @@ function drawRound(){
     who.appendChild(el('div','name',G.players[p]));
     r.appendChild(who);
 
-    const t=el('button','toggle',out?'Fora':'Não vai');
+    const t=el('button','toggle'+(forced?' locked':''),out?'Fora':'Não vai');
     t.setAttribute('aria-pressed',String(out));
-    t.disabled=forced||!G.allowOut||!G.suit;
-    t.onclick=()=>{G.out[p]=!G.out[p];if(G.out[p])G.zero[p]=false;drawRound()};
+    t.disabled=!G.allowOut||!G.suit;
+    t.onclick=()=>{
+      if(forced&&!G.out[p]){
+        toast(forcedWhy(p));
+        t.classList.remove('shake');void t.offsetWidth;t.classList.add('shake');
+        return;
+      }
+      G.out[p]=!G.out[p];if(G.out[p])G.zero[p]=false;drawRound();
+    };
     r.appendChild(t);
 
     const z=el('button','toggle zero','Zero');
@@ -705,9 +753,12 @@ $('#btnRulesGame').onclick=()=>openRules('game');
 $('#btnRulesBack').onclick=()=>{$('#rules').classList.add('hide');$('#'+backTo).classList.remove('hide')};
 
 /* ---------- arranque ---------- */
-drawNames();fillMax();setupTally();
+loadCfg();
+drawNames();fillMax();fillSetup();setupTally();
 load().then(saved=>{
   if(saved&&saved.rounds){
+    if(saved.suit==='nt')saved.suit=null;
+    if(Array.isArray(saved.rounds))saved.rounds.forEach(r=>{if(r.suit==='nt')r.suit=null});
     G=saved;
     $('#resume').classList.remove('hide');
     $('#resumeInfo').textContent=saved.players.join(', ')+' · ronda '+(saved.i+1);
