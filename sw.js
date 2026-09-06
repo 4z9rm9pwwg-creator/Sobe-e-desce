@@ -1,7 +1,7 @@
 /* Sobe e Desce — service worker
    Muda VERSAO sempre que alterares o index.html, senão os telemóveis ficam
    com a versão antiga em cache. */
-const VERSAO = 'sobe-e-desce-v3';
+const VERSAO = 'sobe-e-desce-v4';
 const ESSENCIAIS = [
   './',
   './index.html',
