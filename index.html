@@ -92,6 +92,16 @@ h1,h2,h3{font-family:'Fraunces',Georgia,serif;font-weight:900;margin:0;letter-sp
   padding:11px 13px;box-shadow:0 8px 24px rgba(0,0,0,.55);
   opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .18s,transform .18s}
 .toast.on{opacity:1;transform:none}
+.roles{display:flex;gap:8px;margin-bottom:16px}
+.roles label{flex:1;display:block;font-size:11px;font-weight:600;color:var(--dim);margin:0 0 4px}
+.roles select{width:100%;padding:8px 6px;border:1px solid var(--line);background:var(--raise);color:var(--ink);
+  border-radius:4px;font-family:'Inter Tight',sans-serif;font-size:13.5px;font-weight:600}
+.modal{position:fixed;inset:0;z-index:80;display:flex;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.72);padding:20px}
+.modal-in{background:var(--raise);border:1px solid var(--line);border-top:3px solid var(--red);
+  border-radius:4px;padding:20px;max-width:340px;width:100%;text-align:center}
+.modal-t{font-family:'Fraunces',Georgia,serif;font-size:22px;margin-bottom:8px}
+.modal-b{font-size:14px;line-height:1.45;color:var(--dim);margin-bottom:18px}
 .mnum{width:64px;flex:none;text-align:center;font-family:'Fraunces',serif;font-weight:900;font-size:23px;
   padding:8px 4px;border:1px solid var(--line);background:var(--raise);border-radius:4px;color:var(--ink)}
 .mnum.x2{border-color:var(--gold)}
@@ -197,13 +207,17 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:24px 0}
     <button class="chip" data-end="exact" aria-pressed="false">Tem de dar zero certo<small>Se passasse do zero, fica com os pontos que tinha</small></button>
   </div>
 
-  <label for="maxc">Máximo de cartas por mão</label>
-  <select id="maxc"></select>
-  <p class="note">Só serve para a folha mostrar o tamanho de cada mão. A sequência sobe até ao máximo, desce até 1 e recomeça.</p>
+  <label for="cardsPer">Cartas por mão</label>
+  <input type="number" id="cardsPer" value="5" min="1" max="13">
+  <p class="note">Todas as mãos têm o mesmo número de cartas. A soma das vazas de quem foi a jogo tem de dar exatamente este número.</p>
 
   <hr class="sep">
 
   <label>Regras da casa</label>
+  <label class="check">
+    <input type="checkbox" id="rSound">
+    <span>Efeitos sonoros.</span>
+  </label>
   <label class="check">
     <input type="checkbox" id="allowOut" checked>
     <span>Pode-se ficar de fora de uma ronda, nunca duas seguidas.</span>
@@ -244,7 +258,10 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:24px 0}
       <span class="lbl" id="cardLabel">carta</span>
       <span class="lbl dim" id="roundOf"></span>
     </div>
-    <div class="dealer" id="dealer"></div>
+    <div class="roles">
+      <label>Dá as cartas<select id="selDealer"></select></label>
+      <label>Pede trunfo<select id="selCaller"></select></label>
+    </div>
 
     <div class="suitlabel">Trunfo virado</div>
     <div class="suits" id="suits"></div>
@@ -270,6 +287,14 @@ hr.sep{border:none;border-top:1px solid var(--line);margin:24px 0}
 </section>
 
 <div class="toast" id="toast" role="alert" aria-live="assertive"></div>
+
+<div class="modal hide" id="lowModal" role="dialog" aria-modal="true" aria-labelledby="lowTitle">
+  <div class="modal-in">
+    <div class="modal-t" id="lowTitle"></div>
+    <div class="modal-b" id="lowBody"></div>
+    <button class="btn" id="lowOk">Entendido</button>
+  </div>
+</div>
 
 <!-- ============ REGRAS ============ -->
 <section id="rules" class="hide">
@@ -297,15 +322,43 @@ const SUITS=[
 ];
 const suitOf=k=>SUITS.find(s=>s.k===k)||{k:k||'',sym:'—',nm:'—',red:false};
 
+const MAXJOG=5,MINJOG=2;
 let cfg={players:['Ana','Bruno','Carla','Diogo'],start:25,mustBelow:5,endRule:'atmost',
-  max:10,allowOut:true,hearts:true,clubs:true,doubleNeg:true,zeroPen:5};
+  cards:5,allowOut:true,hearts:true,clubs:true,doubleNeg:true,zeroPen:5,sound:false};
 let G=null;
+let AC=null;
+const sfxOn=()=>G?!!G.sound:!!cfg.sound;
+function ac(){
+  if(!AC){try{AC=new (window.AudioContext||window.webkitAudioContext)()}catch(e){return null}}
+  if(AC.state==='suspended')AC.resume();
+  return AC;
+}
+function tone(notas,dur,tipo,vol){
+  if(!sfxOn())return; const c=ac(); if(!c)return;
+  notas.forEach((f,i)=>{
+    const osc=c.createOscillator(),g=c.createGain(),t0=c.currentTime+i*dur;
+    osc.type=tipo;osc.frequency.value=f;
+    g.gain.setValueAtTime(0.0001,t0);
+    g.gain.linearRampToValueAtTime(vol,t0+0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur*0.92);
+    osc.connect(g);g.connect(c.destination);osc.start(t0);osc.stop(t0+dur);
+  });
+}
+const SFX={
+  guardar:()=>tone([523,784],0.10,'sine',0.10),
+  bloqueio:()=>tone([196,147],0.15,'square',0.08),
+  alerta:()=>tone([880,660,880],0.13,'triangle',0.11),
+  vitoria:()=>tone([523,659,784,1047],0.14,'sine',0.12)
+};
+document.addEventListener('pointerdown',()=>{ac()},{once:true});
 function saveCfg(){try{localStorage.setItem(CKEY,JSON.stringify(cfg))}catch(e){}}
 function loadCfg(){try{const v=localStorage.getItem(CKEY);if(v)Object.assign(cfg,JSON.parse(v))}catch(e){}}
 function fillSetup(){
   $('#startPts').value=cfg.start;
   $('#mustBelow').value=cfg.mustBelow;
   $('#zeroPen').value=cfg.zeroPen;
+  $('#cardsPer').value=cfg.cards;
+  $('#rSound').checked=!!cfg.sound;
   $('#allowOut').checked=cfg.allowOut;
   $('#rHearts').checked=cfg.hearts;
   $('#rClubs').checked=cfg.clubs;
@@ -332,12 +385,6 @@ async function load(){
 }
 
 /* ---------- motor ---------- */
-function sequence(max){
-  const s=[];
-  for(let i=1;i<=max;i++)s.push(i);
-  for(let i=max-1;i>=1;i--)s.push(i);
-  return s;
-}
 function multFor(suit){ return (G.clubs&&suit==='paus')?2:1 }
 // quem não fez nenhuma vaza sobe zeroPen, e o dobro em paus
 function zeroPenalty(suit){ return -G.zeroPen*multFor(suit) }
@@ -383,10 +430,21 @@ function landing(p,raw){                       // onde fica depois de aplicar tu
   if(G.endRule==='exact'&&nv<0)return {pts,to:t,blocked:true};
   return {pts,to:nv,blocked:false};
 }
-const cardsAt=i=>G.seq[i%G.seq.length];
-const lapAt=i=>Math.floor(i/G.seq.length)+1;
+const cardsAt=()=>G.cards||5;
+function callerRule(d){const n=G.players.length;return n>=4?(d+1)%n:d}
+function trickSum(){
+  let s=0;
+  G.players.forEach((_,p)=>{ if(!G.out[p]&&!G.zero[p]) s+=Math.max(0,+G.pts[p]||0) });
+  return s;
+}
+function soloCaller(){
+  if(nActive()!==1)return -1;
+  const i=G.out.findIndex(o=>!o);
+  return i===G.caller?i:-1;
+}
 function satOutLast(p){const n=G.rounds.length;return n?!!G.rounds[n-1].out[p]:false}
 function mustPlay(p){
+  if(p===G.caller)return true;
   if(!G.allowOut)return true;
   if(satOutLast(p))return true;
   if(totals()[p]<G.mustBelow)return true;
@@ -396,6 +454,7 @@ function mustPlay(p){
 const nActive=()=>G.out.filter(o=>!o).length;
 function forcedWhy(p){
   const nome=G.players[p];
+  if(p===G.caller)return nome+' pediu o trunfo. Quem pede vai sempre a jogo.';
   if(!G.allowOut)return 'Nesta partida ninguém pode ficar de fora.';
   if(satOutLast(p))return nome+' passou a ronda anterior. Não se pode passar duas seguidas.';
   if(totals()[p]<G.mustBelow)return nome+' tem menos de '+G.mustBelow+' pontos. Abaixo de '+G.mustBelow+' vai-se sempre a jogo.';
@@ -417,7 +476,7 @@ function drawNames(){
     inp.type='text';inp.value=n;inp.placeholder='Nome';inp.setAttribute('aria-label','Jogador '+(i+1));
     inp.oninput=()=>{cfg.players[i]=inp.value;setupTally()};
     r.appendChild(inp);
-    if(cfg.players.length>2){
+    if(cfg.players.length>MINJOG){
       const x=el('button','x','✕');x.title='Remover';
       x.onclick=()=>{cfg.players.splice(i,1);drawNames();setupTally()};
       r.appendChild(x);
@@ -425,29 +484,29 @@ function drawNames(){
     box.appendChild(r);
   });
 }
-function fillMax(){
-  const sel=$('#maxc');sel.innerHTML='';
-  for(let i=3;i<=13;i++){
-    const o=document.createElement('option');o.value=i;o.textContent=i+' cartas';sel.appendChild(o);
-  }
-  sel.value=cfg.max;
-}
 function setupTally(){
-  const nomes=cfg.players.length>=2&&cfg.players.every(p=>p.trim());
+  const nomes=cfg.players.length>=MINJOG&&cfg.players.length<=MAXJOG&&cfg.players.every(p=>p.trim());
   const pontos=cfg.start>=1;
-  const ok=nomes&&pontos;
+  const cartas=cfg.cards>=1;
+  const ok=nomes&&pontos&&cartas;
   $('#setupTally').innerHTML=ok
-    ? cfg.players.length+' jogadores · de <b>'+cfg.start+'</b> a <b>0</b>'
-    : (!nomes?'Faltam nomes':'Os pontos iniciais têm de ser pelo menos 1');
+    ? cfg.players.length+' jogadores · de <b>'+cfg.start+'</b> a <b>0</b> · '+cfg.cards+' cartas'
+    : (!nomes?(cfg.players.length>MAXJOG?'No máximo '+MAXJOG+' jogadores':'Faltam nomes')
+       :!pontos?'Os pontos iniciais têm de ser pelo menos 1'
+       :'Tem de haver pelo menos 1 carta por mão');
   $('#setupTally').classList.toggle('warn',!ok);
   $('#btnStart').disabled=!ok;
   saveCfg();
 }
-$('#addPlayer').onclick=()=>{if(cfg.players.length<8){cfg.players.push('');drawNames();setupTally()}};
+$('#addPlayer').onclick=()=>{
+  if(cfg.players.length>=MAXJOG){toast('O máximo são '+MAXJOG+' jogadores.');SFX.bloqueio();return}
+  cfg.players.push('');drawNames();setupTally();
+};
 $('#startPts').oninput=e=>{cfg.start=Math.abs(+e.target.value)||0;setupTally()};
 $('#mustBelow').oninput=e=>{cfg.mustBelow=Math.abs(+e.target.value)||0;saveCfg()};
 $('#zeroPen').oninput=e=>{cfg.zeroPen=Math.abs(+e.target.value)||0;saveCfg()};
-$('#maxc').onchange=e=>{cfg.max=+e.target.value;saveCfg()};
+$('#cardsPer').oninput=e=>{cfg.cards=Math.abs(+e.target.value)||0;setupTally()};
+$('#rSound').onchange=e=>{cfg.sound=e.target.checked;saveCfg();if(cfg.sound){ac();SFX.guardar()}};
 $('#endChips').onclick=e=>{
   const b=e.target.closest('.chip');if(!b)return;
   cfg.endRule=b.dataset.end;
@@ -461,8 +520,9 @@ $('#rNeg').onchange=e=>{cfg.doubleNeg=e.target.checked;saveCfg()};
 
 $('#btnStart').onclick=()=>{
   G={players:cfg.players.map(p=>p.trim()),start:cfg.start,mustBelow:cfg.mustBelow,endRule:cfg.endRule,
-     seq:sequence(cfg.max),allowOut:cfg.allowOut,hearts:cfg.hearts,clubs:cfg.clubs,doubleNeg:cfg.doubleNeg,
-     zeroPen:cfg.zeroPen,rounds:[],i:0,suit:null,out:[],pts:[],zero:[]};
+     cards:cfg.cards,allowOut:cfg.allowOut,hearts:cfg.hearts,clubs:cfg.clubs,doubleNeg:cfg.doubleNeg,
+     zeroPen:cfg.zeroPen,sound:cfg.sound,rounds:[],i:0,suit:null,out:[],pts:[],zero:[],
+     dealer:0,caller:null,alerted:[]};
   startRound();
   $('#setup').classList.add('hide');$('#game').classList.remove('hide');
   panel('round');save();
@@ -472,6 +532,8 @@ $('#btnStart').onclick=()=>{
 function startRound(){
   const n=G.players.length;
   G.suit=null;
+  if(G.dealer==null||G.dealer>=n)G.dealer=0;
+  G.caller=callerRule(G.dealer);
   G.out=Array(n).fill(false);
   G.pts=Array(n).fill(0);
   G.zero=Array(n).fill(false);
@@ -499,12 +561,24 @@ function drawSuits(){
     :!G.suit?'Escolhe o naipe da carta virada.'
     :'Sem regra especial neste naipe.';
 }
+function fillRoles(){
+  [['#selDealer','dealer'],['#selCaller','caller']].forEach(([sel,campo])=>{
+    const s=$(sel);s.innerHTML='';
+    G.players.forEach((nome,i)=>{
+      const o=document.createElement('option');o.value=i;o.textContent=nome;s.appendChild(o);
+    });
+    s.value=G[campo];
+  });
+}
 function drawRound(){
-  const c=cardsAt(G.i),n=G.players.length,dealer=G.i%n,T=totals();
+  const c=cardsAt(),n=G.players.length,dealer=G.dealer,T=totals();
   $('#cardCount').textContent=c;
   $('#cardLabel').textContent=c===1?'carta':'cartas';
-  $('#roundOf').textContent='ronda '+(G.i+1)+(G.i>=G.seq.length?' · '+lapAt(G.i)+'ª volta':'');
-  $('#dealer').textContent='Dá as cartas: '+G.players[dealer];
+  $('#roundOf').textContent='ronda '+(G.i+1);
+  if(G.caller!=null)G.out[G.caller]=false;
+  const solo=soloCaller();
+  if(solo>=0){G.zero[solo]=false;G.pts[solo]=c}
+  fillRoles();
   drawSuits();
 
   const rows=$('#rows');rows.innerHTML='';
@@ -534,7 +608,7 @@ function drawRound(){
     const z=el('button','toggle zero','Zero');
     z.setAttribute('aria-pressed',String(!!G.zero[p]));
     z.title='Não fez nenhuma vaza';
-    z.disabled=out||!G.suit;
+    z.disabled=out||!G.suit||solo===p;
     z.onclick=()=>{G.zero[p]=!G.zero[p];drawRound()};
     if(out)z.classList.add('hide');
     r.appendChild(z);
@@ -542,9 +616,14 @@ function drawRound(){
     const inp=document.createElement('input');
     inp.type='number';inp.inputMode='numeric';inp.className='mnum'+(multFor(G.suit)===2?' x2':'');
     inp.value=G.zero[p]?-G.zeroPen:G.pts[p];
-    inp.disabled=out||!G.suit||!!G.zero[p];
-    inp.setAttribute('aria-label','Pontos de '+G.players[p]);
-    inp.oninput=()=>{G.pts[p]=+inp.value||0;refreshMeta()};
+    inp.min=0;inp.max=c;
+    inp.disabled=out||!G.suit||!!G.zero[p]||solo===p;
+    inp.setAttribute('aria-label','Vazas de '+G.players[p]);
+    inp.oninput=()=>{
+      let v=Math.floor(Math.abs(+inp.value||0));
+      if(v>c){v=c;inp.value=c;toast('Só há '+c+' vazas na mão. Não dá para apontar mais.');SFX.bloqueio()}
+      G.pts[p]=v;refreshMeta();tally();
+    };
     if(out)inp.classList.add('hide');
     r.appendChild(inp);
 
@@ -556,13 +635,14 @@ function drawRound(){
   tally();
 }
 function refreshMeta(){
-  const T=totals(),dealer=G.i%G.players.length;
+  const T=totals();
   document.querySelectorAll('.meta[data-p]').forEach(m=>{
     const p=+m.dataset.p;
     if(G.out[p]){m.innerHTML='fora desta ronda · fica em '+T[p];return}
     const raw=rawOf(p),L=G.zero[p]?landingZero(p):landing(p,raw);
     const bits=['tem '+T[p]];
-    if(p===dealer)bits.push('dá as cartas');
+    if(p===G.dealer)bits.push('dá as cartas');
+    if(p===G.caller)bits.push('pede trunfo');
     if(mustPlay(p)&&G.allowOut){
       bits.push(satOutLast(p)?'passou a anterior, tem de ir'
         :T[p]<G.mustBelow?'abaixo de '+G.mustBelow+', tem de ir'
@@ -581,18 +661,45 @@ function refreshMeta(){
 function tally(){
   const t=$('#tally'),b=$('#btnNext');
   t.classList.remove('warn');b.disabled=false;
-  if(!G.suit){t.textContent='Falta o naipe do trunfo.';t.classList.add('warn');b.disabled=true;return}
-  const k=nActive();
-  if(k<2){t.textContent='Não dá para jogar com menos de dois.';t.classList.add('warn');b.disabled=true;return}
-  const m=multFor(G.suit);
-  t.innerHTML='<b>'+k+'</b> a jogo'+(G.players.length-k?', '+(G.players.length-k)+' de fora':'')+
+  const mau=msg=>{t.innerHTML=msg;t.classList.add('warn');b.disabled=true};
+  if(!G.suit)return mau('Falta o naipe do trunfo.');
+  const k=nActive(),c=cardsAt(),m=multFor(G.suit);
+  if(k<1)return mau('Quem pede o trunfo tem de ir a jogo.');
+  const soma=trickSum();
+  if(soma!==c)return mau('Vazas: <b>'+soma+'</b> de '+c+' — '+
+    (soma<c?'faltam '+(c-soma):'sobram '+(soma-c)));
+  const semVaza=G.players.findIndex((_,p)=>!G.out[p]&&!G.zero[p]&&(+G.pts[p]||0)===0);
+  if(semVaza>=0)return mau(G.players[semVaza]+' ficou sem vazas — carrega em <b>Zero</b>.');
+  const solo=soloCaller();
+  t.innerHTML=(solo>=0
+      ? '<b>'+G.players[solo]+'</b> sozinho · leva as '+c+' vazas'
+      : '<b>'+k+'</b> a jogo'+(G.players.length-k?', '+(G.players.length-k)+' de fora':''))+
     (m===2?' · <span style="color:var(--gold)">tudo a dobrar</span>':'');
 }
+function avisarBaixos(){
+  const T=totals(),novos=[];
+  G.players.forEach((_,p)=>{
+    if(T[p]<=G.mustBelow){ if(!G.alerted[p]){G.alerted[p]=true;novos.push(p)} }
+    else G.alerted[p]=false;
+  });
+  if(!novos.length)return;
+  const nomes=novos.map(p=>G.players[p]+' ('+T[p]+')');
+  $('#lowTitle').textContent=novos.length>1?'Reta final':'Atenção';
+  $('#lowBody').innerHTML=nomes.join('<br>')+'<br><br>'+
+    (novos.length>1?'Estão':'Está')+' em '+G.mustBelow+' pontos ou menos. '+
+    'Abaixo de '+G.mustBelow+' é obrigatório ir a jogo.';
+  $('#lowModal').classList.remove('hide');
+  SFX.alerta();
+}
+$('#lowOk').onclick=()=>$('#lowModal').classList.add('hide');
 $('#btnNext').onclick=()=>{
   const pts=G.players.map((_,p)=>ptsOf(p));
-  G.rounds.push({cards:cardsAt(G.i),suit:G.suit,out:[...G.out],zero:[...G.zero],pts});
+  G.rounds.push({cards:cardsAt(),suit:G.suit,out:[...G.out],zero:[...G.zero],pts,
+                 dealer:G.dealer,caller:G.caller});
   G.i++;
-  if(champion().length)finish();else{startRound();panel('round')}
+  G.dealer=(G.dealer+1)%G.players.length;
+  if(champion().length){SFX.vitoria();finish()}
+  else{SFX.guardar();startRound();panel('round');avisarBaixos()}
   save();
 };
 
@@ -696,14 +803,14 @@ $('#btnReset').onclick=()=>{
 
 /* ================= REGRAS ================= */
 function rulesHTML(){
-  const c=G||cfg, seq=G?G.seq:sequence(cfg.max);
-  const seqTxt=seq.length>14?seq.slice(0,7).join(', ')+' … '+seq.slice(-3).join(', '):seq.join(', ');
+  const c=G||cfg, nc=(G?G.cards:cfg.cards)||5;
   return `
 <p>Toda a gente começa com ${c.start} pontos e vai descontando. Ganha o primeiro a chegar a zero, por isso aqui ter menos é ir à frente. A app não conta as vazas: escreves tu os pontos de cada ronda.</p>
 
 <div class="live"><b>A vossa mesa</b><br>
 ${c.players.length} jogadores · começam em ${c.start}<br>
-Cartas por ronda: ${seqTxt} — e recomeça se ninguém tiver chegado a zero.</div>
+${nc} cartas por mão, sempre · quem dá roda a cada ronda<br>
+${c.players.length>=4?'Pede trunfo quem está a seguir a quem dá':'Quem dá é quem pede o trunfo'}</div>
 
 <h2>Distribuir</h2>
 <ul>
@@ -754,11 +861,20 @@ $('#btnRulesBack').onclick=()=>{$('#rules').classList.add('hide');$('#'+backTo).
 
 /* ---------- arranque ---------- */
 loadCfg();
-drawNames();fillMax();fillSetup();setupTally();
+if(cfg.players.length>MAXJOG)cfg.players=cfg.players.slice(0,MAXJOG);
+if(cfg.players.length<MINJOG)cfg.players=['Ana','Bruno'];
+if(!cfg.cards)cfg.cards=5;
+$('#selDealer').onchange=e=>{G.dealer=+e.target.value;G.caller=callerRule(G.dealer);drawRound();save()};
+$('#selCaller').onchange=e=>{G.caller=+e.target.value;G.out[G.caller]=false;drawRound();save()};
+drawNames();fillSetup();setupTally();
 load().then(saved=>{
   if(saved&&saved.rounds){
     if(saved.suit==='nt')saved.suit=null;
     if(Array.isArray(saved.rounds))saved.rounds.forEach(r=>{if(r.suit==='nt')r.suit=null});
+    if(!saved.cards)saved.cards=saved.seq?(saved.seq[saved.i%saved.seq.length]||5):5;
+    if(saved.dealer==null)saved.dealer=saved.i%saved.players.length;
+    if(!Array.isArray(saved.alerted))saved.alerted=[];
+    if(saved.sound==null)saved.sound=!!cfg.sound;
     G=saved;
     $('#resume').classList.remove('hide');
     $('#resumeInfo').textContent=saved.players.join(', ')+' · ronda '+(saved.i+1);
